@@ -39,11 +39,43 @@ export interface AccountResponse {
   resets_at?: string;
 }
 
+// 代理相关类型
+export type ProxyMode = 'disabled' | 'fixed' | 'dynamic';
+export type RotationStrategy = 'sequential' | 'random' | 'random_no_repeat' | 'per_account';
+
+export interface ProxySettings {
+  mode: ProxyMode;
+  fixed_url?: string | null;
+  rotation_strategy: RotationStrategy;
+  rotation_interval: number;
+  cooldown_duration: number;
+  fallback_strategy: RotationStrategy;
+}
+
+export interface ProxiesRead {
+  content: string;
+  count: number;
+}
+
+export interface ProxiesUpdate {
+  content: string;
+}
+
+export interface ProxyStatus {
+  mode: string;
+  total: number;
+  available: number;
+  current: string | null;
+  strategy: string | null;
+  account_mappings: number;
+}
+
 // 设置相关类型
 export interface SettingsRead {
   api_keys: string[];
   admin_api_keys: string[];
-  proxy_url?: string | null;
+  proxy_url?: string | null;  // 已废弃，仅用于向后兼容读取旧配置
+  proxy?: ProxySettings | null;
   claude_ai_url: string;
   claude_api_baseurl: string;
   custom_prompt?: string | null;
@@ -62,7 +94,8 @@ export interface SettingsRead {
 export interface SettingsUpdate {
   api_keys?: string[];
   admin_api_keys?: string[];
-  proxy_url?: string | null;
+  // proxy_url 已废弃，不再用于更新
+  proxy?: ProxySettings | null;
   claude_ai_url?: string;
   claude_api_baseurl?: string;
   custom_prompt?: string | null;

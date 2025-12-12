@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Key, RefreshCw, Sliders, Globe, Shield, Check, AlertCircle, Loader2, Trash2, Copy, Eye, EyeOff } from 'lucide-react'
-import type { SettingsRead, SettingsUpdate } from '../api/types'
+import type { SettingsRead, SettingsUpdate, ProxySettings } from '../api/types'
 import { settingsApi } from '../api/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { DynamicProxySettings } from '@/components/DynamicProxySettings'
 
 export function Settings() {
     const [settings, setSettings] = useState<SettingsRead | null>(null)
@@ -493,18 +494,18 @@ export function Settings() {
                                 onBlur={() => handleFieldChange(settings)}
                             />
                         </div>
-
-                        <div className='space-y-2 md:col-span-2'>
-                            <Label htmlFor='proxy-url'>代理 URL (可选)</Label>
-                            <Input
-                                id='proxy-url'
-                                value={settings.proxy_url || ''}
-                                onChange={e => updateSettings({ ...settings, proxy_url: e.target.value || null })}
-                                onBlur={() => handleFieldChange(settings)}
-                                placeholder='留空则不使用代理'
-                            />
-                        </div>
                     </div>
+
+                    <Separator />
+
+                    {/* 代理设置 */}
+                    <DynamicProxySettings
+                        proxySettings={settings.proxy}
+                        fixedUrl={settings.proxy_url}
+                        onSettingsChange={(newProxy: ProxySettings) => {
+                            handleFieldChange({ ...settings, proxy: newProxy })
+                        }}
+                    />
                 </CardContent>
             </Card>
 
