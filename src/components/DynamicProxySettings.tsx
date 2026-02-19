@@ -243,7 +243,7 @@ http://user:pass@host:port
 socks5://host:port
 host:port
 host:port:user:pass`}
-                                            className="min-h-[300px] font-mono text-sm"
+                                            className="min-h-[300px] max-h-[70vh] overflow-y-auto font-mono text-sm"
                                         />
                                     )}
                                     <DialogFooter>
