@@ -5,6 +5,8 @@ import type {
     AccountCreate,
     AccountUpdate,
     OAuthCodeExchange,
+    BatchDeleteRequest,
+    BatchDeleteResult,
     SettingsRead,
     SettingsUpdate,
     StatisticsResponse,
@@ -59,6 +61,8 @@ export const accountsApi = {
     update: (organizationUuid: string, account: AccountUpdate) =>
         api.put<AccountResponse>(`/api/admin/accounts/${organizationUuid}`, account),
     delete: (organizationUuid: string) => api.delete(`/api/admin/accounts/${organizationUuid}`),
+    batchDelete: (data: BatchDeleteRequest) =>
+        api.post<BatchDeleteResult>('/api/admin/accounts/batch/delete', data),
     exchangeOAuthCode: (exchangeData: OAuthCodeExchange) =>
         api.post<AccountResponse>('/api/admin/accounts/oauth/exchange', exchangeData),
 }

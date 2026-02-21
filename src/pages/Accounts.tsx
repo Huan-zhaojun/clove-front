@@ -13,17 +13,26 @@ import {
     ChevronRight,
     KeyRound,
     FileText,
+    ArrowUp,
+    ArrowDown,
+    ArrowUpDown,
 } from 'lucide-react'
 import type { AccountResponse } from '../api/types'
 import { accountsApi } from '../api/client'
 import { AccountModal } from '../components/AccountModal'
 import { OAuthModal } from '../components/OAuthModal'
 import { BatchCookieModal } from '../components/BatchCookieModal'
+import { AccountFilters } from '../components/AccountFilters'
+import { AccountSelectionToolbar } from '../components/AccountSelectionToolbar'
+import { AccountPagination } from '../components/AccountPagination'
+import { useAccountList } from '@/hooks/use-account-list'
+import type { SortField } from '@/hooks/use-account-list'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Checkbox } from '@/components/ui/checkbox'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
     AlertDialog,
@@ -38,9 +47,173 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { useIsMobile } from '@/hooks/use-mobile'
 
+// 认证方式图标
+function getAuthTypeIcon(authType: string) {
+    if (authType === 'both') {
+        return <Shield className='h-4 w-4' />
+    } else if (authType === 'oauth_only') {
+        return <KeyRound className='h-4 w-4' />
+    } else {
+        return <Cookie className='h-4 w-4' />
+    }
+}
+
+// 认证方式名称
+function getAuthTypeName(authType: string) {
+    switch (authType) {
+        case 'cookie_only':
+            return 'Cookie'
+        case 'oauth_only':
+            return 'OAuth'
+        case 'both':
+            return 'Cookie + OAuth'
+        default:
+            return authType
+    }
+}
+
+// 状态图标
+function getStatusIcon(status: string) {
+    switch (status) {
+        case 'valid':
+            return <CheckCircle className='h-4 w-4 text-green-500' />
+        case 'invalid':
+            return <XCircle className='h-4 w-4 text-red-500' />
+        case 'rate_limited':
+            return <AlertCircle className='h-4 w-4 text-yellow-500' />
+        default:
+            return null
+    }
+}
+
+// 状态名称
+function getStatusName(status: string) {
+    switch (status) {
+        case 'valid':
+            return '正常'
+        case 'invalid':
+            return '无效'
+        case 'rate_limited':
+            return '限流中'
+        default:
+            return status
+    }
+}
+
+// 账户类型 Badge
+function AccountTypeBadge({ account }: { account: AccountResponse }) {
+    if (account.is_max) {
+        return (
+            <Badge variant='default' className='bg-gradient-to-r from-purple-500 to-pink-500'>
+                Max
+            </Badge>
+        )
+    } else if (account.is_pro) {
+        return (
+            <Badge variant='secondary' className='bg-gradient-to-r from-blue-500 to-purple-500 text-white'>
+                Pro
+            </Badge>
+        )
+    } else {
+        return <Badge variant='outline'>Free</Badge>
+    }
+}
+
+// 移动端账户卡片（提取为顶层组件避免重新挂载导致滚动重置）
+interface MobileAccountCardProps {
+    account: AccountResponse
+    isExpanded: boolean
+    isSelected: boolean
+    onToggleExpansion: () => void
+    onToggleSelect: () => void
+    onEdit: () => void
+    onDelete: () => void
+}
+
+function MobileAccountCard({
+    account,
+    isExpanded,
+    isSelected,
+    onToggleExpansion,
+    onToggleSelect,
+    onEdit,
+    onDelete,
+}: MobileAccountCardProps) {
+    return (
+        <Card className='mb-4'>
+            <Collapsible open={isExpanded} onOpenChange={onToggleExpansion}>
+                <CollapsibleTrigger asChild>
+                    <CardHeader className='cursor-pointer'>
+                        <div className='flex items-start justify-between'>
+                            <div className='flex items-start gap-3 flex-1'>
+                                {/* Checkbox（阻止冒泡避免展开/折叠） */}
+                                <div className='pt-0.5' onClick={e => e.stopPropagation()}>
+                                    <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={onToggleSelect}
+                                    />
+                                </div>
+                                <div className='flex-1 space-y-2'>
+                                    <div className='flex items-center gap-2'>
+                                        <AccountTypeBadge account={account} />
+                                        <div className='flex items-center gap-1'>
+                                            {getStatusIcon(account.status)}
+                                            <span className='text-sm'>{getStatusName(account.status)}</span>
+                                        </div>
+                                    </div>
+                                    <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+                                        {getAuthTypeIcon(account.auth_type)}
+                                        <span>{getAuthTypeName(account.auth_type)}</span>
+                                    </div>
+                                    <p className='font-mono text-xs text-muted-foreground truncate'>
+                                        {account.organization_uuid}
+                                    </p>
+                                </div>
+                            </div>
+                            <ChevronRight
+                                className={`h-5 w-5 text-muted-foreground transition-transform ${
+                                    isExpanded ? 'rotate-90' : ''
+                                }`}
+                            />
+                        </div>
+                    </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                    <CardContent className='pt-0 space-y-3'>
+                        <div className='space-y-2 text-sm'>
+                            <div className='flex justify-between'>
+                                <span className='text-muted-foreground'>最后使用</span>
+                                <span>{new Date(account.last_used).toLocaleString('zh-CN')}</span>
+                            </div>
+                            <div className='flex justify-between'>
+                                <span className='text-muted-foreground'>重置时间</span>
+                                <span>{account.resets_at ? new Date(account.resets_at).toLocaleString('zh-CN') : '-'}</span>
+                            </div>
+                        </div>
+                        <div className='flex gap-2 pt-2'>
+                            <Button size='sm' variant='outline' className='flex-1' onClick={onEdit}>
+                                <Pencil className='mr-2 h-4 w-4' />
+                                编辑
+                            </Button>
+                            <Button
+                                size='sm'
+                                variant='outline'
+                                className='flex-1 text-destructive hover:bg-destructive hover:text-destructive-foreground'
+                                onClick={onDelete}
+                            >
+                                <Trash2 className='mr-2 h-4 w-4' />
+                                删除
+                            </Button>
+                        </div>
+                    </CardContent>
+                </CollapsibleContent>
+            </Collapsible>
+        </Card>
+    )
+}
+
 export function Accounts() {
-    const [accounts, setAccounts] = useState<AccountResponse[]>([])
-    const [loading, setLoading] = useState(true)
+    const accountList = useAccountList()
     const [modalOpen, setModalOpen] = useState(false)
     const [oauthModalOpen, setOauthModalOpen] = useState(false)
     const [batchModalOpen, setBatchModalOpen] = useState(false)
@@ -50,24 +223,26 @@ export function Accounts() {
     const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
     const isMobile = useIsMobile()
 
+    // 加载账户数据
     const loadAccounts = async () => {
         try {
             const response = await accountsApi.list()
-            setAccounts(response.data)
+            accountList.setAccounts(response.data)
         } catch (error) {
             console.error('Failed to load accounts:', error)
         } finally {
-            setLoading(false)
+            accountList.setLoading(false)
         }
     }
 
     useEffect(() => {
         loadAccounts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    // 单个删除
     const handleDelete = async () => {
         if (!accountToDelete) return
-
         try {
             await accountsApi.delete(accountToDelete)
             await loadAccounts()
@@ -75,7 +250,6 @@ export function Accounts() {
             setAccountToDelete(null)
         } catch (error) {
             console.error('Failed to delete account:', error)
-            alert('删除账户失败')
         }
     }
 
@@ -117,148 +291,36 @@ export function Accounts() {
         })
     }
 
-    const getAuthTypeIcon = (authType: string) => {
-        if (authType === 'both') {
-            return <Shield className='h-4 w-4' />
-        } else if (authType === 'oauth_only') {
-            return <KeyRound className='h-4 w-4' />
-        } else {
-            return <Cookie className='h-4 w-4' />
+    // 排序指示器图标
+    const SortIndicator = ({ field }: { field: SortField }) => {
+        if (accountList.sortField !== field) {
+            return <ArrowUpDown className='h-3.5 w-3.5 text-muted-foreground/50' />
         }
-    }
-
-    const getAuthTypeName = (authType: string) => {
-        switch (authType) {
-            case 'cookie_only':
-                return 'Cookie'
-            case 'oauth_only':
-                return 'OAuth'
-            case 'both':
-                return 'Cookie + OAuth'
-            default:
-                return authType
+        if (accountList.sortDirection === 'asc') {
+            return <ArrowUp className='h-3.5 w-3.5' />
         }
+        return <ArrowDown className='h-3.5 w-3.5' />
     }
 
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case 'valid':
-                return <CheckCircle className='h-4 w-4 text-green-500' />
-            case 'invalid':
-                return <XCircle className='h-4 w-4 text-red-500' />
-            case 'rate_limited':
-                return <AlertCircle className='h-4 w-4 text-yellow-500' />
-            default:
-                return null
-        }
-    }
-
-    const getStatusName = (status: string) => {
-        switch (status) {
-            case 'valid':
-                return '正常'
-            case 'invalid':
-                return '无效'
-            case 'rate_limited':
-                return '限流中'
-            default:
-                return status
-        }
-    }
-
-    const AccountTypeBadge = ({ account }: { account: AccountResponse }) => {
-        if (account.is_max) {
-            return (
-                <Badge variant='default' className='bg-gradient-to-r from-purple-500 to-pink-500'>
-                    Max
-                </Badge>
-            )
-        } else if (account.is_pro) {
-            return (
-                <Badge variant='secondary' className='bg-gradient-to-r from-blue-500 to-purple-500 text-white'>
-                    Pro
-                </Badge>
-            )
-        } else {
-            return <Badge variant='outline'>Free</Badge>
-        }
-    }
-
-    const MobileAccountCard = ({ account }: { account: AccountResponse }) => {
-        const isExpanded = expandedCards.has(account.organization_uuid)
-
-        return (
-            <Card className='mb-4'>
-                <Collapsible open={isExpanded} onOpenChange={() => toggleCardExpansion(account.organization_uuid)}>
-                    <CollapsibleTrigger asChild>
-                        <CardHeader className='cursor-pointer'>
-                            <div className='flex items-start justify-between'>
-                                <div className='flex-1 space-y-2'>
-                                    <div className='flex items-center gap-2'>
-                                        <AccountTypeBadge account={account} />
-                                        <div className='flex items-center gap-1'>
-                                            {getStatusIcon(account.status)}
-                                            <span className='text-sm'>{getStatusName(account.status)}</span>
-                                        </div>
-                                    </div>
-                                    <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-                                        {getAuthTypeIcon(account.auth_type)}
-                                        <span>{getAuthTypeName(account.auth_type)}</span>
-                                    </div>
-                                    <p className='font-mono text-xs text-muted-foreground truncate'>
-                                        {account.organization_uuid}
-                                    </p>
-                                </div>
-                                <ChevronRight
-                                    className={`h-5 w-5 text-muted-foreground transition-transform ${
-                                        isExpanded ? 'rotate-90' : ''
-                                    }`}
-                                />
-                            </div>
-                        </CardHeader>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                        <CardContent className='pt-0 space-y-3'>
-                            <div className='space-y-2 text-sm'>
-                                <div className='flex justify-between'>
-                                    <span className='text-muted-foreground'>最后使用</span>
-                                    <span>{new Date(account.last_used).toLocaleString('zh-CN')}</span>
-                                </div>
-                                <div className='flex justify-between'>
-                                    <span className='text-muted-foreground'>重置时间</span>
-                                    <span>{account.resets_at ? new Date(account.resets_at).toLocaleString('zh-CN') : '-'}</span>
-                                </div>
-                            </div>
-                            <div className='flex gap-2 pt-2'>
-                                <Button size='sm' variant='outline' className='flex-1' onClick={() => handleEdit(account)}>
-                                    <Pencil className='mr-2 h-4 w-4' />
-                                    编辑
-                                </Button>
-                                <Button
-                                    size='sm'
-                                    variant='outline'
-                                    className='flex-1 text-destructive hover:bg-destructive hover:text-destructive-foreground'
-                                    onClick={() => {
-                                        setAccountToDelete(account.organization_uuid)
-                                        setDeleteDialogOpen(true)
-                                    }}
-                                >
-                                    <Trash2 className='mr-2 h-4 w-4' />
-                                    删除
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </CollapsibleContent>
-                </Collapsible>
-            </Card>
-        )
-    }
+    // 可排序表头
+    const SortableHeader = ({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) => (
+        <TableHead className={className}>
+            <button
+                className='flex items-center gap-1 hover:text-foreground transition-colors whitespace-nowrap'
+                onClick={() => accountList.toggleSort(field)}
+            >
+                {children}
+                <SortIndicator field={field} />
+            </button>
+        </TableHead>
+    )
 
     if (isMobile === undefined) {
         return null
     }
 
-    if (loading) {
+    // 加载骨架屏
+    if (accountList.loading) {
         return (
             <div className='space-y-6'>
                 <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
@@ -275,35 +337,21 @@ export function Accounts() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>
-                                            <Skeleton className='h-4 w-32' />
-                                        </TableHead>
-                                        <TableHead>
-                                            <Skeleton className='h-4 w-24' />
-                                        </TableHead>
-                                        <TableHead>
-                                            <Skeleton className='h-4 w-16' />
-                                        </TableHead>
-                                        <TableHead>
-                                            <Skeleton className='h-4 w-24' />
-                                        </TableHead>
-                                        <TableHead>
-                                            <Skeleton className='h-4 w-32' />
-                                        </TableHead>
-                                        <TableHead>
-                                            <Skeleton className='h-4 w-32' />
-                                        </TableHead>
-                                        <TableHead className='text-right'>
-                                            <Skeleton className='h-4 w-16 ml-auto' />
-                                        </TableHead>
+                                        <TableHead><Skeleton className='h-4 w-4' /></TableHead>
+                                        <TableHead><Skeleton className='h-4 w-32' /></TableHead>
+                                        <TableHead><Skeleton className='h-4 w-24' /></TableHead>
+                                        <TableHead><Skeleton className='h-4 w-16' /></TableHead>
+                                        <TableHead><Skeleton className='h-4 w-24' /></TableHead>
+                                        <TableHead><Skeleton className='h-4 w-32' /></TableHead>
+                                        <TableHead><Skeleton className='h-4 w-32' /></TableHead>
+                                        <TableHead className='text-right'><Skeleton className='h-4 w-16 ml-auto' /></TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {[...Array(5)].map((_, i) => (
                                         <TableRow key={i}>
-                                            <TableCell>
-                                                <Skeleton className='h-4 w-64' />
-                                            </TableCell>
+                                            <TableCell><Skeleton className='h-4 w-4' /></TableCell>
+                                            <TableCell><Skeleton className='h-4 w-64' /></TableCell>
                                             <TableCell>
                                                 <div className='flex items-center gap-2'>
                                                     <Skeleton className='h-4 w-4 rounded' />
@@ -316,18 +364,10 @@ export function Accounts() {
                                                     <Skeleton className='h-4 w-12' />
                                                 </div>
                                             </TableCell>
-                                            <TableCell>
-                                                <Skeleton className='h-6 w-16 rounded-full' />
-                                            </TableCell>
-                                            <TableCell>
-                                                <Skeleton className='h-4 w-32' />
-                                            </TableCell>
-                                            <TableCell>
-                                                <Skeleton className='h-4 w-32' />
-                                            </TableCell>
-                                            <TableCell className='text-right'>
-                                                <Skeleton className='h-8 w-8 rounded ml-auto' />
-                                            </TableCell>
+                                            <TableCell><Skeleton className='h-6 w-16 rounded-full' /></TableCell>
+                                            <TableCell><Skeleton className='h-4 w-32' /></TableCell>
+                                            <TableCell><Skeleton className='h-4 w-32' /></TableCell>
+                                            <TableCell className='text-right'><Skeleton className='h-8 w-8 rounded ml-auto' /></TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
@@ -366,7 +406,8 @@ export function Accounts() {
     }
 
     return (
-        <div className='space-y-6'>
+        <div className='space-y-4'>
+            {/* 页面标题 + 操作按钮 */}
             <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
                 <div>
                     <h1 className='text-3xl font-bold tracking-tight pb-1'>账户管理</h1>
@@ -388,7 +429,35 @@ export function Accounts() {
                 </div>
             </div>
 
-            {accounts.length === 0 ? (
+            {/* 筛选工具栏 */}
+            <AccountFilters
+                searchQuery={accountList.searchQuery}
+                onSearchChange={accountList.setSearchQuery}
+                statusFilter={accountList.statusFilter}
+                onStatusFilterChange={accountList.setStatusFilter}
+                authTypeFilter={accountList.authTypeFilter}
+                onAuthTypeFilterChange={accountList.setAuthTypeFilter}
+                accountTypeFilter={accountList.accountTypeFilter}
+                onAccountTypeFilterChange={accountList.setAccountTypeFilter}
+                isAllSelected={accountList.isAllSelected}
+                onSelectAll={accountList.selectAll}
+                onClearSelection={accountList.clearSelection}
+                sortField={accountList.sortField}
+                sortDirection={accountList.sortDirection}
+                onSetSort={accountList.setSort}
+                isMobile={isMobile}
+            />
+
+            {/* 批量操作工具栏 */}
+            <AccountSelectionToolbar
+                selectedCount={accountList.selectedIds.size}
+                selectedIds={accountList.selectedIds}
+                onClearSelection={accountList.clearSelection}
+                onDeleteComplete={loadAccounts}
+            />
+
+            {/* 账户列表 */}
+            {accountList.accounts.length === 0 ? (
                 <Card>
                     <CardContent className='flex flex-col items-center justify-center py-12'>
                         <div className='rounded-full bg-muted p-6 mb-4'>
@@ -412,24 +481,47 @@ export function Accounts() {
                         </div>
                     </CardContent>
                 </Card>
+            ) : accountList.totalFiltered === 0 ? (
+                /* 有账户但筛选结果为空 */
+                <Card>
+                    <CardContent className='flex flex-col items-center justify-center py-12'>
+                        <p className='text-muted-foreground'>无匹配的账户</p>
+                    </CardContent>
+                </Card>
             ) : !isMobile ? (
+                /* 桌面端表格 */
                 <Card>
                     <CardContent className='p-0 overflow-x-auto'>
                         <Table>
                             <TableHeader>
                                 <TableRow>
+                                    <TableHead className='w-10'>
+                                        <Checkbox
+                                            checked={accountList.isPageAllSelected}
+                                            onCheckedChange={() => accountList.toggleSelectPage()}
+                                        />
+                                    </TableHead>
                                     <TableHead>Organization UUID</TableHead>
                                     <TableHead>认证方式</TableHead>
-                                    <TableHead>状态</TableHead>
-                                    <TableHead>账户类型</TableHead>
-                                    <TableHead>最后使用</TableHead>
-                                    <TableHead>重置时间</TableHead>
+                                    <SortableHeader field='status' className='min-w-[90px]'>状态</SortableHeader>
+                                    <SortableHeader field='account_type'>账户类型</SortableHeader>
+                                    <SortableHeader field='last_used'>最后使用</SortableHeader>
+                                    <SortableHeader field='resets_at'>重置时间</SortableHeader>
                                     <TableHead className='text-right'>操作</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {accounts.map(account => (
-                                    <TableRow key={account.organization_uuid}>
+                                {accountList.paginatedAccounts.map(account => (
+                                    <TableRow
+                                        key={account.organization_uuid}
+                                        data-state={accountList.selectedIds.has(account.organization_uuid) ? 'selected' : undefined}
+                                    >
+                                        <TableCell>
+                                            <Checkbox
+                                                checked={accountList.selectedIds.has(account.organization_uuid)}
+                                                onCheckedChange={() => accountList.toggleSelect(account.organization_uuid)}
+                                            />
+                                        </TableCell>
                                         <TableCell className='font-mono text-sm'>{account.organization_uuid}</TableCell>
                                         <TableCell>
                                             <div className='flex items-center gap-2'>
@@ -485,13 +577,39 @@ export function Accounts() {
                     </CardContent>
                 </Card>
             ) : (
+                /* 移动端卡片列表 */
                 <div>
-                    {accounts.map(account => (
-                        <MobileAccountCard key={account.organization_uuid} account={account} />
+                    {accountList.paginatedAccounts.map(account => (
+                        <MobileAccountCard
+                            key={account.organization_uuid}
+                            account={account}
+                            isExpanded={expandedCards.has(account.organization_uuid)}
+                            isSelected={accountList.selectedIds.has(account.organization_uuid)}
+                            onToggleExpansion={() => toggleCardExpansion(account.organization_uuid)}
+                            onToggleSelect={() => accountList.toggleSelect(account.organization_uuid)}
+                            onEdit={() => handleEdit(account)}
+                            onDelete={() => {
+                                setAccountToDelete(account.organization_uuid)
+                                setDeleteDialogOpen(true)
+                            }}
+                        />
                     ))}
                 </div>
             )}
 
+            {/* 分页控件（有筛选结果时显示） */}
+            {accountList.totalFiltered > 0 && (
+                <AccountPagination
+                    page={accountList.page}
+                    pageSize={accountList.pageSize}
+                    totalFiltered={accountList.totalFiltered}
+                    totalPages={accountList.totalPages}
+                    onPageChange={accountList.setPage}
+                    onPageSizeChange={accountList.setPageSize}
+                />
+            )}
+
+            {/* 单个删除确认对话框 */}
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -512,6 +630,7 @@ export function Accounts() {
                 </AlertDialogContent>
             </AlertDialog>
 
+            {/* 弹窗 */}
             {modalOpen && <AccountModal account={editingAccount} onClose={handleModalClose} />}
             {oauthModalOpen && <OAuthModal onClose={handleOAuthModalClose} />}
             {batchModalOpen && <BatchCookieModal onClose={handleBatchModalClose} />}

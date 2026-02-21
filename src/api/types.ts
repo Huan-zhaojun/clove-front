@@ -115,6 +115,17 @@ export interface ApiError {
   detail: string;
 }
 
+// 批量操作类型
+export interface BatchDeleteRequest {
+  organization_uuids: string[];
+}
+
+export interface BatchDeleteResult {
+  success_count: number;
+  failure_count: number;
+  failures: Array<{ organization_uuid: string; error: string }>;
+}
+
 // 统计相关类型
 export interface AccountStats {
   total_accounts: number;
