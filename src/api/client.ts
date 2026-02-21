@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 import { toast } from 'sonner'
 import type {
     AccountResponse,
@@ -46,7 +46,10 @@ api.interceptors.response.use(
         // 尝试获取错误响应中的 detail.message
         const errorMessage = error.response?.data?.detail?.message || '发生未知错误'
 
-        toast.error(errorMessage)
+        // 批量操作等场景可通过 skipToast 跳过全局错误提示
+        if (!error.config?.skipToast) {
+            toast.error(errorMessage)
+        }
 
         // 继续抛出错误，以便组件层可以进一步处理
         return Promise.reject(error)
@@ -57,7 +60,8 @@ api.interceptors.response.use(
 export const accountsApi = {
     list: () => api.get<AccountResponse[]>('/api/admin/accounts'),
     get: (organizationUuid: string) => api.get<AccountResponse>(`/api/admin/accounts/${organizationUuid}`),
-    create: (account: AccountCreate) => api.post<AccountResponse>('/api/admin/accounts', account),
+    create: (account: AccountCreate, config?: AxiosRequestConfig) =>
+        api.post<AccountResponse>('/api/admin/accounts', account, config),
     update: (organizationUuid: string, account: AccountUpdate) =>
         api.put<AccountResponse>(`/api/admin/accounts/${organizationUuid}`, account),
     delete: (organizationUuid: string) => api.delete(`/api/admin/accounts/${organizationUuid}`),

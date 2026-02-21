@@ -3,6 +3,7 @@ import { Loader2, AlertCircle, CheckCircle, Cookie, FileText, Copy, Check, XCirc
 import { accountsApi } from '../api/client'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -28,6 +29,7 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
     const [isProcessing, setIsProcessing] = useState(false)
     const [results, setResults] = useState<CookieResult[]>([])
     const [showResults, setShowResults] = useState(false)
+    const [concurrency, setConcurrency] = useState(3)
     const isMobile = useIsMobile()
     const cancelledRef = useRef(false)
 
@@ -43,18 +45,27 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
         return { isValid, processedValue }
     }
 
+    // 并发批量添加（Worker Pool 模式）
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        const cookieLines = cookies
+        const rawLines = cookies
             .split('\n')
             .map(line => line.trim())
             .filter(line => line.length > 0)
 
-        if (cookieLines.length === 0) {
+        if (rawLines.length === 0) {
             return
         }
 
+        // 提交前自动去重
+        const uniqueLines = [...new Set(rawLines)]
+        const removedCount = rawLines.length - uniqueLines.length
+        if (removedCount > 0) {
+            toast.info(`已自动去重 ${removedCount} 条重复 Cookie`)
+        }
+
+        const cookieLines = uniqueLines
         cancelledRef.current = false
         setIsProcessing(true)
         setShowResults(true)
@@ -65,76 +76,93 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
         }))
         setResults(initialResults)
 
-        for (let i = 0; i < cookieLines.length; i++) {
-            // 检查是否已取消
-            if (cancelledRef.current) {
+        // Worker Pool: 共享索引，多个 worker 并发拉取任务
+        let nextIndex = 0
+        const totalCount = cookieLines.length
+
+        const processOne = async () => {
+            while (true) {
+                // JS 单线程，nextIndex++ 原子安全
+                const i = nextIndex++
+                if (i >= totalCount) return
+
+                // 检查是否已取消
+                if (cancelledRef.current) {
+                    setResults(prev => {
+                        const updated = [...prev]
+                        if (updated[i]?.status === 'pending') {
+                            updated[i] = { ...updated[i], status: 'cancelled' }
+                        }
+                        return updated
+                    })
+                    return
+                }
+
+                // 标记为处理中
                 setResults(prev => {
                     const updated = [...prev]
-                    for (let j = i; j < updated.length; j++) {
-                        if (updated[j].status === 'pending') {
-                            updated[j] = { ...updated[j], status: 'cancelled' }
-                        }
-                    }
+                    updated[i] = { ...updated[i], status: 'processing' }
                     return updated
                 })
-                break
-            }
 
-            const cookie = cookieLines[i]
+                try {
+                    const { isValid, processedValue } = validateAndProcessCookie(cookieLines[i])
 
-            setResults(prev => {
-                const updated = [...prev]
-                updated[i] = { ...updated[i], status: 'processing' }
-                return updated
-            })
+                    if (!isValid) {
+                        setResults(prev => {
+                            const updated = [...prev]
+                            updated[i] = {
+                                ...updated[i],
+                                status: 'error',
+                                error: 'Cookie 格式无效',
+                            }
+                            return updated
+                        })
+                        continue
+                    }
 
-            try {
-                const { isValid, processedValue } = validateAndProcessCookie(cookie)
+                    const createData: AccountCreate = {
+                        cookie_value: processedValue,
+                    }
 
-                if (!isValid) {
+                    // 批量操作跳过全局 toast 错误提示
+                    const response = await accountsApi.create(createData, { skipToast: true } as any)
+
+                    setResults(prev => {
+                        const updated = [...prev]
+                        updated[i] = {
+                            ...updated[i],
+                            status: 'success',
+                            organizationUuid: response.data.organization_uuid,
+                        }
+                        return updated
+                    })
+                } catch (error: any) {
+                    const errorMessage = error.response?.data?.detail?.message || '添加失败'
+
                     setResults(prev => {
                         const updated = [...prev]
                         updated[i] = {
                             ...updated[i],
                             status: 'error',
-                            error: 'Cookie 格式无效',
+                            error: errorMessage,
                         }
                         return updated
                     })
-                    continue
                 }
-
-                const createData: AccountCreate = {
-                    cookie_value: processedValue,
-                }
-
-                const response = await accountsApi.create(createData)
-
-                setResults(prev => {
-                    const updated = [...prev]
-                    updated[i] = {
-                        ...updated[i],
-                        status: 'success',
-                        organizationUuid: response.data.organization_uuid,
-                    }
-                    return updated
-                })
-            } catch (error: any) {
-                const errorMessage = error.response?.data?.detail?.message || '添加失败'
-
-                setResults(prev => {
-                    const updated = [...prev]
-                    updated[i] = {
-                        ...updated[i],
-                        status: 'error',
-                        error: errorMessage,
-                    }
-                    return updated
-                })
             }
+        }
 
-            // 小延迟，避免请求过快
-            await new Promise(resolve => setTimeout(resolve, 300))
+        // 启动 min(concurrency, totalCount) 个 worker 并发执行
+        const workerCount = Math.min(concurrency, totalCount)
+        const workers = Array.from({ length: workerCount }, () => processOne())
+        await Promise.allSettled(workers)
+
+        // 扫尾：将剩余 pending 标记为 cancelled（取消触发时可能有遗留）
+        if (cancelledRef.current) {
+            setResults(prev =>
+                prev.map(r => (r.status === 'pending' ? { ...r, status: 'cancelled' } : r)),
+            )
         }
 
         setIsProcessing(false)
@@ -146,6 +174,7 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
         return (processed / results.length) * 100
     }
 
+    const getProcessingCount = () => results.filter(r => r.status === 'processing').length
     const getSuccessCount = () => results.filter(r => r.status === 'success').length
     const getErrorCount = () => results.filter(r => r.status === 'error').length
     const getCancelledCount = () => results.filter(r => r.status === 'cancelled').length
@@ -221,7 +250,7 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
                             className='min-h-[200px] max-h-[70vh] overflow-y-auto font-mono text-sm break-all'
                             required
                         />
-                        <p className='text-sm text-muted-foreground'>支持直接粘贴 sessionKey 或完整的 Cookie 格式</p>
+                        <p className='text-sm text-muted-foreground'>支持直接粘贴 sessionKey 或完整的 Cookie 格式，自动去重</p>
                     </div>
                 </>
             ) : (
@@ -230,6 +259,7 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
                         <div className='flex items-center justify-between'>
                             <Label>处理进度</Label>
                             <span className='text-sm text-muted-foreground'>
+                                {getProcessingCount() > 0 && `${getProcessingCount()} 处理中 / `}
                                 {getSuccessCount()} 成功 / {getErrorCount()} 失败
                                 {getCancelledCount() > 0 && ` / ${getCancelledCount()} 已取消`}
                                 {' '}/ {results.length} 总计
@@ -291,10 +321,33 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
         </>
     )
 
+    // 并发数选择器组件
+    const concurrencySelector = (
+        <div className='flex items-center gap-2 mr-auto'>
+            <Label htmlFor='concurrency' className='text-sm whitespace-nowrap'>
+                并发
+            </Label>
+            <Select value={String(concurrency)} onValueChange={v => setConcurrency(Number(v))}>
+                <SelectTrigger size='sm' className='w-[4.5rem]'>
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value='1'>1</SelectItem>
+                    <SelectItem value='2'>2</SelectItem>
+                    <SelectItem value='3'>3</SelectItem>
+                    <SelectItem value='5'>5</SelectItem>
+                    <SelectItem value='10'>10</SelectItem>
+                    <SelectItem value='20'>20</SelectItem>
+                </SelectContent>
+            </Select>
+        </div>
+    )
+
     const footerContent = (
         <>
             {!showResults ? (
                 <>
+                    {concurrencySelector}
                     <Button type='button' variant='outline' onClick={handleClose}>
                         取消
                     </Button>
@@ -325,7 +378,17 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
     if (!isMobile) {
         return (
             <Dialog open={true} onOpenChange={handleClose}>
-                <DialogContent className='sm:max-w-[600px]'>
+                <DialogContent
+                    className='sm:max-w-[600px]'
+                    onInteractOutside={e => {
+                        // 处理中阻止点击遮罩关闭/取消
+                        if (isProcessing) e.preventDefault()
+                    }}
+                    onEscapeKeyDown={e => {
+                        // 处理中阻止 ESC 关闭/取消
+                        if (isProcessing) e.preventDefault()
+                    }}
+                >
                     <form onSubmit={handleSubmit}>
                         <DialogHeader>
                             <DialogTitle>批量添加 Cookie</DialogTitle>
@@ -340,7 +403,7 @@ export function BatchCookieModal({ onClose }: BatchCookieModalProps) {
     }
 
     return (
-        <Drawer open={true} onOpenChange={handleClose}>
+        <Drawer open={true} onOpenChange={open => { if (!isProcessing || open) handleClose() }} dismissible={!isProcessing}>
             <DrawerContent>
                 <form onSubmit={handleSubmit} className='max-h-[90vh] overflow-auto'>
                     <DrawerHeader>
