@@ -32,13 +32,6 @@ export function Dashboard() {
 
     const stats = [
         {
-            name: '账户总数',
-            value: serverStatus === 'offline' ? 'N/A' : (statistics?.accounts.total_accounts ?? 0).toString(),
-            icon: Users,
-            color: 'text-pink-500',
-            bgColor: 'bg-pink-50',
-        },
-        {
             name: '服务器状态',
             value: serverStatus === 'online' ? '在线' : '离线',
             icon: Server,
@@ -94,6 +87,57 @@ export function Dashboard() {
             </div>
 
             <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-4'>
+                {/* 账户总数卡片 - 包含状态明细 */}
+                <Card className='hover:shadow-lg transition-shadow gap-1 py-4'>
+                    <CardHeader className='flex flex-row items-center justify-between space-y-0'>
+                        <CardTitle className='text-md font-medium text-muted-foreground'>账户总数</CardTitle>
+                        <div className='p-3 rounded-full bg-pink-50'>
+                            <Users className='h-6 w-6 text-pink-500' />
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        <div className='flex justify-between items-end'>
+                            <div className='text-2xl font-bold mb-1'>{/* 调整左右数字高度 */}
+                                {serverStatus === 'offline'
+                                    ? 'N/A'
+                                    : (statistics?.accounts.total_accounts ?? 0)}
+                            </div>
+                            {serverStatus !== 'offline' && (
+                                <div className='flex items-end gap-3 flex-wrap'>
+                                    <div className='flex flex-col items-center'>
+                                        <div className='flex items-center gap-1'>
+                                            <span className='w-2 h-2 rounded-full bg-green-500' />
+                                            <span className='text-sm font-semibold text-foreground'>
+                                                {statistics?.accounts.valid_accounts ?? 0}
+                                            </span>
+                                        </div>
+                                        <span className='text-xs text-muted-foreground'>正常</span>
+                                    </div>
+                                    <div className='flex flex-col items-center'>
+                                        <div className='flex items-center gap-1'>
+                                            <span className='w-2 h-2 rounded-full bg-yellow-500' />
+                                            <span className='text-sm font-semibold text-foreground'>
+                                                {statistics?.accounts.rate_limited_accounts ?? 0}
+                                            </span>
+                                        </div>
+                                        <span className='text-xs text-muted-foreground'>限流</span>
+                                    </div>
+                                    <div className='flex flex-col items-center'>
+                                        <div className='flex items-center gap-1'>
+                                            <span className='w-2 h-2 rounded-full bg-red-500' />
+                                            <span className='text-sm font-semibold text-foreground'>
+                                                {statistics?.accounts.invalid_accounts ?? 0}
+                                            </span>
+                                        </div>
+                                        <span className='text-xs text-muted-foreground'>无效</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* 其余统计卡片 */}
                 {stats.map(item => (
                     <Card key={item.name} className='hover:shadow-lg transition-shadow gap-1 py-4'>
                         <CardHeader className='flex flex-row items-center justify-between space-y-0'>
