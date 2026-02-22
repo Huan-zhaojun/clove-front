@@ -126,6 +126,27 @@ export interface BatchDeleteResult {
   failures: Array<{ organization_uuid: string; error: string }>;
 }
 
+// 刷新操作类型
+export interface AccountRefreshResult {
+  organization_uuid: string;
+  previous_status: string;
+  new_status: string;
+  auth_type: string;
+  capabilities?: string[];
+  error?: string;
+}
+
+export interface BatchRefreshRequest {
+  organization_uuids: string[];
+  concurrency?: number;
+}
+
+export interface BatchRefreshResult {
+  success_count: number;
+  failure_count: number;
+  results: AccountRefreshResult[];
+}
+
 // 统计相关类型
 export interface AccountStats {
   total_accounts: number;

@@ -16,7 +16,10 @@ import {
     ArrowUp,
     ArrowDown,
     ArrowUpDown,
+    RefreshCw,
+    Loader2,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import type { AccountResponse } from '../api/types'
 import { accountsApi } from '../api/client'
 import { AccountModal } from '../components/AccountModal'
@@ -124,8 +127,10 @@ interface MobileAccountCardProps {
     account: AccountResponse
     isExpanded: boolean
     isSelected: boolean
+    isRefreshing: boolean
     onToggleExpansion: () => void
     onToggleSelect: () => void
+    onRefresh: () => void
     onEdit: () => void
     onDelete: () => void
 }
@@ -134,8 +139,10 @@ function MobileAccountCard({
     account,
     isExpanded,
     isSelected,
+    isRefreshing,
     onToggleExpansion,
     onToggleSelect,
+    onRefresh,
     onEdit,
     onDelete,
 }: MobileAccountCardProps) {
@@ -157,8 +164,9 @@ function MobileAccountCard({
                                     <div className='flex items-center gap-2'>
                                         <AccountTypeBadge account={account} />
                                         <div className='flex items-center gap-1'>
-                                            {getStatusIcon(account.status)}
-                                            <span className='text-sm'>{getStatusName(account.status)}</span>
+                                            {isRefreshing
+                                                ? <><Loader2 className='h-4 w-4 animate-spin text-blue-500' /><span className='text-sm text-blue-500'>刷新中</span></>
+                                                : <>{getStatusIcon(account.status)}<span className='text-sm'>{getStatusName(account.status)}</span></>}
                                         </div>
                                     </div>
                                     <div className='flex items-center gap-2 text-sm text-muted-foreground'>
@@ -191,6 +199,12 @@ function MobileAccountCard({
                             </div>
                         </div>
                         <div className='flex gap-2 pt-2'>
+                            <Button size='sm' variant='outline' className='flex-1' onClick={onRefresh} disabled={isRefreshing}>
+                                {isRefreshing
+                                    ? <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                    : <RefreshCw className='mr-2 h-4 w-4' />}
+                                刷新
+                            </Button>
                             <Button size='sm' variant='outline' className='flex-1' onClick={onEdit}>
                                 <Pencil className='mr-2 h-4 w-4' />
                                 编辑
@@ -221,6 +235,7 @@ export function Accounts() {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [accountToDelete, setAccountToDelete] = useState<string | null>(null)
     const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+    const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set())
     const isMobile = useIsMobile()
 
     // 加载账户数据
@@ -277,6 +292,32 @@ export function Accounts() {
     const handleBatchModalClose = () => {
         setBatchModalOpen(false)
         loadAccounts()
+    }
+
+    // 单账户刷新
+    const handleRefreshAccount = async (account: AccountResponse) => {
+        const uuid = account.organization_uuid
+        setRefreshingIds(prev => new Set(prev).add(uuid))
+        try {
+            const response = await accountsApi.refreshAccount(uuid)
+            const result = response.data
+            if (result.new_status === 'valid') {
+                toast.success(`账户状态: ${getStatusName(result.new_status)}`)
+            } else if (result.new_status === 'rate_limited') {
+                toast.warning(`账户状态: ${getStatusName(result.new_status)}`)
+            } else {
+                toast.error(`账户状态: ${getStatusName(result.new_status)}`)
+            }
+            await loadAccounts()
+        } catch {
+            toast.error('刷新账户状态失败')
+        } finally {
+            setRefreshingIds(prev => {
+                const next = new Set(prev)
+                next.delete(uuid)
+                return next
+            })
+        }
     }
 
     const toggleCardExpansion = (uuid: string) => {
@@ -454,6 +495,7 @@ export function Accounts() {
                 selectedIds={accountList.selectedIds}
                 onClearSelection={accountList.clearSelection}
                 onDeleteComplete={loadAccounts}
+                onRefreshComplete={loadAccounts}
             />
 
             {/* 账户列表 */}
@@ -531,8 +573,9 @@ export function Accounts() {
                                         </TableCell>
                                         <TableCell>
                                             <div className='flex items-center gap-2'>
-                                                {getStatusIcon(account.status)}
-                                                <span>{getStatusName(account.status)}</span>
+                                                {refreshingIds.has(account.organization_uuid)
+                                                    ? <><Loader2 className='h-4 w-4 animate-spin text-blue-500' /><span className='text-blue-500'>刷新中</span></>
+                                                    : <>{getStatusIcon(account.status)}<span>{getStatusName(account.status)}</span></>}
                                             </div>
                                         </TableCell>
                                         <TableCell>
@@ -553,6 +596,15 @@ export function Accounts() {
                                                     </Button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align='end'>
+                                                    <DropdownMenuItem
+                                                        onClick={() => handleRefreshAccount(account)}
+                                                        disabled={refreshingIds.has(account.organization_uuid)}
+                                                    >
+                                                        {refreshingIds.has(account.organization_uuid)
+                                                            ? <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                                            : <RefreshCw className='mr-2 h-4 w-4' />}
+                                                        刷新
+                                                    </DropdownMenuItem>
                                                     <DropdownMenuItem onClick={() => handleEdit(account)}>
                                                         <Pencil className='mr-2 h-4 w-4' />
                                                         编辑
@@ -585,8 +637,10 @@ export function Accounts() {
                             account={account}
                             isExpanded={expandedCards.has(account.organization_uuid)}
                             isSelected={accountList.selectedIds.has(account.organization_uuid)}
+                            isRefreshing={refreshingIds.has(account.organization_uuid)}
                             onToggleExpansion={() => toggleCardExpansion(account.organization_uuid)}
                             onToggleSelect={() => accountList.toggleSelect(account.organization_uuid)}
+                            onRefresh={() => handleRefreshAccount(account)}
                             onEdit={() => handleEdit(account)}
                             onDelete={() => {
                                 setAccountToDelete(account.organization_uuid)

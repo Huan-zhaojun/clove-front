@@ -7,6 +7,9 @@ import type {
     OAuthCodeExchange,
     BatchDeleteRequest,
     BatchDeleteResult,
+    AccountRefreshResult,
+    BatchRefreshRequest,
+    BatchRefreshResult,
     SettingsRead,
     SettingsUpdate,
     StatisticsResponse,
@@ -67,6 +70,10 @@ export const accountsApi = {
     delete: (organizationUuid: string) => api.delete(`/api/admin/accounts/${organizationUuid}`),
     batchDelete: (data: BatchDeleteRequest) =>
         api.post<BatchDeleteResult>('/api/admin/accounts/batch/delete', data),
+    refreshAccount: (organizationUuid: string, config?: AxiosRequestConfig) =>
+        api.post<AccountRefreshResult>(`/api/admin/accounts/${organizationUuid}/refresh`, null, config),
+    batchRefresh: (data: BatchRefreshRequest) =>
+        api.post<BatchRefreshResult>('/api/admin/accounts/batch/refresh', data),
     exchangeOAuthCode: (exchangeData: OAuthCodeExchange) =>
         api.post<AccountResponse>('/api/admin/accounts/oauth/exchange', exchangeData),
 }

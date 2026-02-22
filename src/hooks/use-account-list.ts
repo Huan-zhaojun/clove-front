@@ -74,7 +74,7 @@ function getStatusWeight(status: string): number {
 // 账户列表管理 Hook：筛选 → 排序 → 分页 + 选择
 export function useAccountList(): UseAccountListReturn {
     // 原始数据
-    const [accounts, setAccounts] = useState<AccountResponse[]>([])
+    const [accounts, setAccountsRaw] = useState<AccountResponse[]>([])
     const [loading, setLoading] = useState(true)
 
     // 筛选状态
@@ -96,6 +96,16 @@ export function useAccountList(): UseAccountListReturn {
 
     // 选择状态
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+    // 设置账户数据并修剪失效的选中项
+    const setAccounts = useCallback((newAccounts: AccountResponse[]) => {
+        setAccountsRaw(newAccounts)
+        const validUuids = new Set(newAccounts.map(a => a.organization_uuid))
+        setSelectedIds(prev => {
+            const pruned = new Set([...prev].filter(id => validUuids.has(id)))
+            return pruned.size === prev.size ? prev : pruned
+        })
+    }, [])
 
     // 筛选变化时自动回到第 1 页
     const setSearchQuery = useCallback((query: string) => {

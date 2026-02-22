@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Trash2, X } from 'lucide-react'
+import { Trash2, X, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,23 +13,27 @@ import {
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { accountsApi } from '@/api/client'
+import { BatchRefreshModal } from '@/components/BatchRefreshModal'
 
 interface AccountSelectionToolbarProps {
     selectedCount: number
     selectedIds: Set<string>
     onClearSelection: () => void
     onDeleteComplete: () => void
+    onRefreshComplete: () => void
 }
 
-// 批量操作工具栏：选中数量 + 批量删除 + 取消选择
+// 批量操作工具栏：选中数量 + 批量刷新 + 批量删除 + 取消选择
 export function AccountSelectionToolbar({
     selectedCount,
     selectedIds,
     onClearSelection,
     onDeleteComplete,
+    onRefreshComplete,
 }: AccountSelectionToolbarProps) {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [deleting, setDeleting] = useState(false)
+    const [batchRefreshOpen, setBatchRefreshOpen] = useState(false)
 
     // 执行批量删除
     const handleBatchDelete = async () => {
@@ -66,6 +70,14 @@ export function AccountSelectionToolbar({
                 <span className='text-sm font-medium'>
                     已选 {selectedCount} 项
                 </span>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setBatchRefreshOpen(true)}
+                >
+                    <RefreshCw className='mr-1 h-4 w-4' />
+                    批量刷新
+                </Button>
                 <Button
                     variant='destructive'
                     size='sm'
@@ -105,6 +117,16 @@ export function AccountSelectionToolbar({
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {batchRefreshOpen && (
+                <BatchRefreshModal
+                    organizationUuids={Array.from(selectedIds)}
+                    onClose={() => {
+                        setBatchRefreshOpen(false)
+                        onRefreshComplete()
+                    }}
+                />
+            )}
         </>
     )
 }
